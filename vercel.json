@@ -1,0 +1,78 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' https://www.gstatic.com; style-src 'self'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://firestore.googleapis.com https://*.googleapis.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        }
+      ]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
+      ]
+    },
+    {
+      "source": "/js/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/favicon.svg",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "header", "key": "origin", "value": "^https://sqysystems\\.com$" }],
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "https://sqysystems.com" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With" },
+        { "key": "Access-Control-Max-Age", "value": "86400" },
+        { "key": "Vary", "value": "Origin" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "header", "key": "origin", "value": "^https://www\\.sqysystems\\.com$" }],
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "https://www.sqysystems.com" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With" },
+        { "key": "Access-Control-Max-Age", "value": "86400" },
+        { "key": "Vary", "value": "Origin" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "header", "key": "origin", "value": "^http://localhost:5500$" }],
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "http://localhost:5500" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization, X-Requested-With" },
+        { "key": "Access-Control-Max-Age", "value": "86400" },
+        { "key": "Vary", "value": "Origin" }
+      ]
+    }
+  ]
+}

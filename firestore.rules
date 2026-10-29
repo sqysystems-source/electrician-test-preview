@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function isAdmin() {
+      return request.auth != null && request.auth.token.role == 'admin';
+    }
+    function isStr(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    // Public lead payload must match exactly what the website sends.
+    function validLead() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['clientName', 'phone', 'area', 'serviceType', 'notes', 'status', 'createdAt', 'source'])
+        && d.keys().hasAll(['clientName', 'phone', 'area', 'serviceType', 'status', 'createdAt', 'source'])
+        && isStr(d.clientName, 2, 100)
+        && isStr(d.phone, 10, 20)
+        && isStr(d.area, 2, 100)
+        && isStr(d.serviceType, 2, 60)
+        && (!('notes' in d) || isStr(d.notes, 0, 2000))
+        && d.status == 'new'
+        && d.createdAt == request.time
+        && d.source == 'website_quote_form';
+    }
+
+    function validMessage() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'email', 'subject', 'message', 'status', 'createdAt', 'source'])
+        && d.keys().hasAll(['name', 'email', 'subject', 'message', 'status', 'createdAt'])
+        && isStr(d.name, 2, 100)
+        && isStr(d.email, 5, 200)
+        && d.email.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        && isStr(d.subject, 2, 150)
+        && isStr(d.message, 5, 3000)
+        && d.status == 'unread'
+        && d.createdAt == request.time
+        && (!('source' in d) || d.source == 'website_contact_form');
+    }
+
+    // ---------- collections ----------
+
+    // Public can create new leads and contact messages (validated),
+    // but cannot read or tamper with existing submissions.
+    match /leads/{leadId} {
+      allow create: if validLead();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow create: if validMessage();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Public can read general site settings; only the admin can change them.
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Public can read ACTIVE items only (the site queries where('active','==',true)).
+    match /site_items/{itemId} {
+      allow read: if resource.data.active == true || isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}
