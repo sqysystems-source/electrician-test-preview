@@ -1,0 +1,4 @@
+firebase.json
+firestore.rules
+firestore.indexes.json
+js/firebase.js

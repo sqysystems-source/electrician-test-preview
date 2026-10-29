@@ -1,93 +1,83 @@
-# Electrician Site — Firestore-ready (SQySystems Admin compatible)
+# Electrician website — static Greek / English
 
-Static HTML/CSS/vanilla-JS site with background Firestore hydration. No build step, no frameworks.
-The page works fully without Firebase; Firestore only overrides content that exists.
+HTML, CSS and browser-native JavaScript modules. No build, package installation,
+server, database, authentication, dashboard, environment variables or SDKs.
 
-## Structure
+## Configure
 
-```
-index.html            Static Greek baseline (SEO, JSON-LD, all content)
-privacy.html          Privacy policy template (edit before launch)
-404.html              Not-found page
-css/styles.css        Mobile-first styles
-js/config.js          Firebase config + collection names  ← edit this
-js/firebase.js        Lazy SDK loader (Firebase v10.14.1 modular, via gstatic CDN)
-js/hydrate.js         settings/site_info + site_items hydration (onSnapshot)
-js/forms.js           leads + messages submission, validation, honeypot
-js/ui.js              toast, modal, loading state
-js/app.js             entry point
-vercel.json           cleanUrls, security headers, cache, CORS
-firestore.rules       Security rules (deploy to the client's project)
-firebase.json / firestore.indexes.json   For `firebase deploy --only firestore`
-```
+Edit `js/config.js`:
 
-## Setup
+- `primaryPhone`: the real main phone in international format, for example `+30…`.
+  Phone, WhatsApp and Viber use it by default. Override `whatsappPhone` or
+  `viberPhone` if those accounts use different numbers.
+- `CONTACT.emergencyPhone`, `CONTACT.email`, `CONTACT.mapQuery`.
+- `TRANSLATIONS.el` and `TRANSLATIONS.en`: business name, address, hours, licence,
+  all page content, field labels, validation and message headings.
+- `CONTACT.endpoints`: all telephone and messaging URL schemes.
 
-1. **Firebase project**: create one, enable Firestore (Native mode), add a Web app, and paste the config into `js/config.js`.
-2. **Rules**: `firebase deploy --only firestore:rules` (or paste `firestore.rules` into the console).
-3. **Placeholders to replace** in `index.html` / `privacy.html` / `sitemap.xml` / `robots.txt`:
-   business name, phone `+306970000000`, emergency phone `+306970000001`, address, hours, license number,
-   email, canonical/OG URLs (`https://www.example.gr`), JSON-LD block. Also review the marketing claims
-   (e.g. "Εγγύηση εργασιών") so they match what the business really offers.
-4. **Local dev**: serve the folder root on port 5500 (e.g. VS Code Live Server). Paths are root-absolute (`/css/...`).
-5. **Deploy**: import the folder into Vercel (framework preset: Other, no build command).
+**The supplied phone numbers, email, street address, licence number and domain
+are examples from the original project. Replace them before launch.** Confirm
+that the real WhatsApp and Viber accounts are registered to the configured numbers.
+The configured values override every bound visible number, contact link and the
+structured-data telephone. Also update Greek HTML fallback text and `tel:` links
+if you need the real business details available with JavaScript disabled.
 
-## Firestore data model (for the Admin Panel)
+Keep static Greek fallback content in sync when changing copy. Set the real
+canonical and Open Graph URLs and structured-data address in `index.html`, and
+the real domain in the existing `sitemap.xml` and `robots.txt`.
 
-### `settings/site_info` (single doc, public read)
-| field | type | binds to |
-|---|---|---|
-| `businessName` | string | `[data-bind="business-name"]` |
-| `phone` | string | `[data-bind="phone"]` + `tel:` links (`data-bind-href="phone"`) |
-| `emergencyPhone` | string | `[data-bind="emergency-phone"]` + `tel:` links |
-| `address` | string | `[data-bind="address"]` + Google Maps link |
-| `hours` | string (lines separated by `\n`) or string[] | `[data-bind="hours"]`; first line → `hours-short` |
-| `email` | string | `[data-bind="email"]` + `mailto:` |
-| `license` | string | `[data-bind="license"]` |
-| `announcement` | `{ active: boolean, text: string }` | floating banner (`announcementActive` / `announcementText` flat fields also work) |
+## Language
 
-Only fields that exist and are non-empty override the static HTML. The last known settings are cached in
-`localStorage` for instant repeat visits. The announcement banner is a fixed overlay, so toggling it never shifts layout.
+Greek is rendered directly in HTML and is the first-visit default regardless of
+browser language. The `ΕΛ | EN` header buttons switch all copy without reloading,
+including privacy/404 pages, labels, placeholders, errors, metadata, and prepared
+messages. They update `html[lang]` and their `aria-pressed` state. Only the explicit
+selection is stored under `electrician:language:v1`. Invalid or inaccessible
+storage safely falls back to Greek. Form values and selected service survive a
+language switch; service ids are independent of their translated labels.
 
-### `site_items` (public read only when `active == true`)
-| field | type | notes |
-|---|---|---|
-| `title` | string | required |
-| `description` | string | |
-| `iconOrImageUrl` | string | `https://…` image, or icon name (`zap`, `wrench`, `shield`, `file-check`, `home`, `sprout`, `power`, `lightbulb`), or a short emoji |
-| `category` | string | `"portfolio"` → shown in the Portfolio section (hidden until it has items); anything else → Services grid |
-| `active` | boolean | must be `true` to be visible |
-| `order` | number (optional) | ascending sort; ties sorted by title |
+This is a single-URL client-side translation design: Greek is the initial HTML
+seen by crawlers. Separate indexable English routes/hreflang are not included.
 
-If at least one active non-portfolio item exists, it replaces the static service cards. If none exist, the static cards stay.
+## Contact forms
 
-### `leads` (public create, admin read/update/delete)
-`clientName, phone (+30 69XXXXXXXX), area, serviceType, notes, status ("new"|"in_progress"|"completed"|"archived"), createdAt (server timestamp), source ("website_quote_form")`
+Both forms require name, phone, area/address, service and issue description.
+Greek mobile/landline numbers and international numbers with a `+` country code
+are accepted. Messages are formatted in the currently selected language.
 
-### `messages` (public create, admin read/update/delete)
-`name, email, subject, message, status ("unread"), createdAt (server timestamp), source ("website_contact_form")`
+- **WhatsApp** opens `https://wa.me/<digits>?text=<encoded message>` in a new tab.
+  The visitor still has to press Send inside WhatsApp. A persistent preview and
+  direct link are available if a popup is blocked.
+- **Viber** opens `viber://chat?number=%2B<digits>`. The message stays visible in
+  the page; use **Copy message**, open Viber and paste it into the chat. The
+  personal-number chat link does not provide a documented draft parameter.
+  Viber's documented prefilled business links require a registered Business
+  account; this project does not assume the client has one.
+- If copying is unavailable or denied, the text is selected for manual copying.
+- No form data is stored, posted to the host, or marked as delivered. Fields stay
+  filled so the visitor can retry. App launch/delivery cannot be detected by the
+  site; confirm real-device handoff with the client's real accounts before launch.
+- Header/emergency phone links, desktop messaging buttons and the three-button
+  mobile contact bar work independently of form validation.
 
-## Admin role
+## Files
 
-The rules expect a custom claim `role: "admin"`. Set it once with the Admin SDK (Node):
+`index.html`, `privacy.html`, `404.html`, `css/styles.css`, `js/config.js`,
+`js/i18n.js`, `js/forms.js`, `js/ui.js`, `js/hydrate.js`, `js/app.js`.
+`hydrate.js` now only binds local config. All resources needed to render the site
+are local. Third-party requests happen only when a visitor follows an external
+contact/map link.
 
-```js
-import { getAuth } from 'firebase-admin/auth';
-await getAuth().setCustomUserClaims('<ADMIN_UID>', { role: 'admin' });
-```
+## Run / deploy
 
-## Notes & deliberate deviations from the brief
+See `DEPLOYMENT.md` for applying the changed-files ZIP and removing obsolete files.
+For local use run `python3 -m http.server 5500` at the project root, then visit
+`http://localhost:5500`. Use HTTP/HTTPS, not `file://`, for ES modules.
 
-- **Rules are stricter than `allow create: if true`**: public creates must match the exact field set, sizes,
-  `status`, `source` and `createdAt == request.time`, so the open endpoint can't be used to store arbitrary junk.
-  If the Admin Panel ever needs to create leads from the client side with extra fields, extend `validLead()`.
-- **Forms**: honeypot field, 30 s cooldown per form, GDPR consent checkbox, 15 s server-ack timeout with a
-  "call us" fallback message. If Firebase isn't configured, forms show that fallback message instead of failing silently.
-- **CORS on Vercel**: static hosting can't echo the Origin dynamically, so `vercel.json` has one `has: origin`
-  rule per allowed origin (`sqysystems.com`, `www.sqysystems.com`, `localhost:5500`). Vercel doesn't guarantee
-  custom handling of preflight `OPTIONS` for static files; for real API endpoints add an `/api` function that answers `OPTIONS`.
-  Remove the `localhost:5500` block before launch if you don't want it in production.
-- **CSP** allows only `self` + `gstatic.com` scripts and Firestore connections; no inline scripts/styles are used.
-  If you add Google Fonts, analytics or a map embed, extend the policy in `vercel.json`.
-- **Caching**: CSS/JS use 1 day + stale-while-revalidate (files aren't hashed). Put versioned images under `/assets/` for 1-year immutable caching.
-- No `og:image` is set because none is bundled; add a 1200×630 JPG under `/assets/` and an `og:image` meta tag.
+Optional development checks (Node 22+): `node tests/validate.mjs`.
+These checks are not needed for hosting.
+
+Official messaging references:
+
+- https://faq.whatsapp.com/425247423114725/
+- https://help.viber.com/hc/en-us/articles/36712478644381-Get-your-Viber-chat-link-and-QR-code-for-Business-accounts

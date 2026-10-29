@@ -1,182 +1,132 @@
-// Lead (quote) and contact form handling → Firestore `leads` / `messages`.
-import { loadFirebase } from './firebase.js';
-import { COLLECTIONS, SUBMIT_TIMEOUT_MS, COOLDOWN_MS } from './config.js';
-import { $, $$, toast, showModal, setLoading } from './ui.js';
+// The form prepares a message locally. The visitor sends it inside the chosen app.
+import { SERVICE_IDS, contactLink } from './config.js';
+import { t } from './i18n.js';
+import { $, $$ } from './ui.js';
 
-const GREEK_MOBILE = /^(?:\+30|0030)?(69\d{8})$/;
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const trim = (value) => String(value ?? '').trim();
+const inRange = (value, min, max) => value.length >= min && value.length <= max;
 
-const trim = (v) => String(v ?? '').trim();
-const len = (v, min, max) => v.length >= min && v.length <= max;
-
-function normalizeMobile(value) {
-  const m = GREEK_MOBILE.exec(trim(value).replace(/[\s().-]/g, ''));
-  return m ? `+30${m[1]}` : null;
+export function normalizePhone(value) {
+  let phone = trim(value).replace(/[\s().-]/g, '');
+  if (phone.startsWith('00')) phone = `+${phone.slice(2)}`;
+  if (/^(?:69\d{8}|2\d{9})$/.test(phone)) phone = `+30${phone}`;
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) return null;
+  if (phone.startsWith('+30') && !/^\+30(?:69\d{8}|2\d{9})$/.test(phone)) return null;
+  return phone;
 }
 
-/* --------------------------- form definitions --------------------------- */
-
-const FORMS = {
-  'quote-form': {
-    collection: COLLECTIONS.leads,
-    successTitle: 'Ευχαριστούμε!',
-    successText: 'Το αίτημά σας εστάλη. Θα επικοινωνήσουμε μαζί σας το συντομότερο δυνατό.',
-    prepare(data, form) {
-      const errors = {};
-      const clientName = trim(data.clientName);
-      const area = trim(data.area);
-      const serviceType = trim(data.serviceType);
-      const notes = trim(data.notes);
-      const phone = normalizeMobile(data.phone);
-      const allowed = $$('select[name="serviceType"] option', form).map((o) => o.value).filter(Boolean);
-
-      if (!len(clientName, 2, 100)) errors.clientName = 'Συμπληρώστε το ονοματεπώνυμό σας.';
-      if (!phone) errors.phone = 'Εισάγετε έγκυρο ελληνικό κινητό (π.χ. 69X XXX XXXX).';
-      if (!len(area, 2, 100)) errors.area = 'Συμπληρώστε την περιοχή σας.';
-      if (!allowed.includes(serviceType)) errors.serviceType = 'Επιλέξτε είδος εργασίας.';
-      if (notes.length > 2000) errors.notes = 'Το κείμενο είναι πολύ μεγάλο (έως 2000 χαρακτήρες).';
-      if (!data.consent) errors.consent = 'Απαιτείται η συγκατάθεσή σας.';
-
-      return {
-        errors,
-        payload: { clientName, phone, area, serviceType, notes, status: 'new', source: 'website_quote_form' }
-      };
-    }
-  },
-
-  'contact-form': {
-    collection: COLLECTIONS.messages,
-    successTitle: 'Το μήνυμα στάλθηκε',
-    successText: 'Ευχαριστούμε για την επικοινωνία. Θα σας απαντήσουμε σύντομα.',
-    prepare(data) {
-      const errors = {};
-      const name = trim(data.name);
-      const email = trim(data.email);
-      const subject = trim(data.subject);
-      const message = trim(data.message);
-
-      if (!len(name, 2, 100)) errors.name = 'Συμπληρώστε το όνομά σας.';
-      if (!EMAIL.test(email) || email.length > 200) errors.email = 'Εισάγετε έγκυρη διεύθυνση email.';
-      if (!len(subject, 2, 150)) errors.subject = 'Συμπληρώστε το θέμα.';
-      if (!len(message, 5, 3000)) errors.message = 'Γράψτε το μήνυμά σας (5–3000 χαρακτήρες).';
-      if (!data.consent) errors.consent = 'Απαιτείται η συγκατάθεσή σας.';
-
-      return {
-        errors,
-        payload: { name, email, subject, message, status: 'unread', source: 'website_contact_form' }
-      };
-    }
-  }
-};
-
-/* ------------------------------- helpers ------------------------------- */
-
-function showErrors(form, errors) {
-  $$('.field__error', form).forEach((p) => { p.textContent = ''; });
-  $$('[aria-invalid]', form).forEach((i) => i.removeAttribute('aria-invalid'));
-
-  let first = null;
-  Object.entries(errors).forEach(([name, msg]) => {
-    const input = form.elements[name];
-    if (!input) return;
-    input.setAttribute('aria-invalid', 'true');
-    const id = input.getAttribute('aria-describedby');
-    const slot = id ? document.getElementById(id) : null;
-    if (slot) slot.textContent = msg;
-    first = first || input;
-  });
-  first?.focus();
-  return Boolean(first);
-}
-
-const withTimeout = (promise, ms) =>
-  Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-
-function cooldownActive(key) {
-  try { return Date.now() - Number(localStorage.getItem(key) || 0) < COOLDOWN_MS; } catch { return false; }
-}
-function markSent(key) {
-  try { localStorage.setItem(key, String(Date.now())); } catch { /* ignore */ }
-}
-
-function fallbackPhoneText() {
-  const phone = $('[data-bind="phone"]')?.textContent?.trim();
-  return phone ? ` Παρακαλούμε καλέστε μας στο ${phone}.` : '';
-}
-
-/* ------------------------------- submission ------------------------------- */
-
-async function handleSubmit(form, cfg) {
-  if (form.dataset.busy === '1') return;
-
+function readForm(form) {
   const data = Object.fromEntries(new FormData(form));
-  data.consent = form.elements.consent?.checked || false;
+  return {
+    name: trim(data.name), phone: normalizePhone(data.phone), area: trim(data.area),
+    serviceType: trim(data.serviceType), notes: trim(data.notes)
+  };
+}
 
-  // Honeypot: bots fill the hidden field. Pretend success, store nothing.
-  if (trim(data.website)) {
-    form.reset();
-    showModal(cfg.successTitle, cfg.successText);
-    return;
+export function formatMessage(data, kind = 'quote') {
+  return [
+    t(kind === 'contact' ? 'message.contact' : 'message.quote'),
+    t('message.greeting'), '',
+    `${t('form.name')}: ${data.name}`,
+    `${t('form.phone')}: ${data.phone || ''}`,
+    `${t('form.area')}: ${data.area}`,
+    `${t('form.service')}: ${SERVICE_IDS.includes(data.serviceType) ? t(`service.${data.serviceType}`) : ''}`,
+    `${t('form.notes')}: ${data.notes}`
+  ].join('\n');
+}
+
+function showError(form, name, key = '') {
+  const input = form.elements.namedItem(name);
+  if (!input) return;
+  const slot = document.getElementById(input.getAttribute('aria-describedby'));
+  if (key) input.setAttribute('aria-invalid', 'true');
+  else input.removeAttribute('aria-invalid');
+  if (slot) {
+    if (key) slot.dataset.i18n = key;
+    else delete slot.dataset.i18n;
+    slot.textContent = key ? t(key) : '';
   }
+}
 
-  const { errors, payload } = cfg.prepare(data, form);
-  if (showErrors(form, errors)) return;
+function validate(form, focus = true) {
+  const data = readForm(form);
+  const errors = {
+    name: !inRange(data.name, 2, 100), phone: !data.phone,
+    area: !inRange(data.area, 2, 200), serviceType: !SERVICE_IDS.includes(data.serviceType),
+    notes: !inRange(data.notes, 5, 2000)
+  };
+  Object.entries(errors).forEach(([name, invalid]) => showError(form, name, invalid ? `error.${name}` : ''));
+  const first = Object.keys(errors).find((name) => errors[name]);
+  if (first && focus) form.elements.namedItem(first)?.focus();
+  return !first;
+}
 
-  const cooldownKey = `sqy:last:${cfg.collection}`;
-  if (cooldownActive(cooldownKey)) {
-    toast('Έχετε ήδη στείλει αίτημα πριν από λίγο. Παρακαλούμε περιμένετε λίγο.', 'info');
-    return;
-  }
+function status(form, key) {
+  const node = $('[data-form-status]', form);
+  node.dataset.i18n = key;
+  node.textContent = t(key);
+}
 
-  setLoading(form, true);
+function refreshMessage(form) {
+  const message = formatMessage(readForm(form), form.id === 'contact-form' ? 'contact' : 'quote');
+  $('[data-message-preview]', form).value = message;
+  $('[data-open-whatsapp]', form).href = contactLink('whatsapp', message);
+  $('[data-open-viber]', form).href = contactLink('viber');
+  return message;
+}
+
+async function copyMessage(form) {
+  const preview = $('[data-message-preview]', form);
+  refreshMessage(form);
   try {
-    const fb = await loadFirebase();
-    if (!fb) throw new Error('unavailable');
-
-    const { collection, addDoc, serverTimestamp } = fb.fs;
-    await withTimeout(
-      addDoc(collection(fb.db, cfg.collection), { ...payload, createdAt: serverTimestamp() }),
-      SUBMIT_TIMEOUT_MS
-    );
-
-    markSent(cooldownKey);
-    setLoading(form, false);
-    form.reset();
-    showErrors(form, {});
-    showModal(cfg.successTitle, cfg.successText);
-    toast('Εστάλη με επιτυχία ✔', 'success', 3500);
-  } catch (err) {
-    setLoading(form, false);
-    const msg = err?.message === 'timeout'
-      ? 'Δεν λάβαμε επιβεβαίωση αποστολής.'
-      : 'Δεν ήταν δυνατή η αποστολή αυτή τη στιγμή.';
-    toast(msg + fallbackPhoneText(), 'error', 8000);
+    if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+    await navigator.clipboard.writeText(preview.value);
+    status(form, 'feedback.copied');
+  } catch {
+    // Works without Clipboard permission and on ordinary HTTP hosting.
+    preview.focus();
+    preview.select();
+    status(form, 'feedback.copyFailed');
   }
 }
 
 export function initForms() {
-  Object.entries(FORMS).forEach(([id, cfg]) => {
-    const form = document.getElementById(id);
-    if (!form) return;
-
-    form.addEventListener('submit', (e) => { e.preventDefault(); handleSubmit(form, cfg); });
-    form.addEventListener('focusin', () => { loadFirebase(); }, { once: true }); // warm up the SDK
+  $$('#quote-form, #contact-form').forEach((form) => {
+    // Static markup keeps submission disabled until its local handler is ready.
+    $$('button[type="submit"]', form).forEach((button) => { button.disabled = false; });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!validate(form)) return;
+      const channel = event.submitter?.value === 'viber' ? 'viber' : 'whatsapp';
+      const message = refreshMessage(form);
+      $('[data-message-panel]', form).hidden = false;
+      status(form, `feedback.${channel}`);
+      // Synchronous navigation preserves the user gesture. No network submission,
+      // no reset, and no claim that a message has been delivered.
+      if (channel === 'whatsapp') window.open(contactLink(channel, message), '_blank', 'noopener,noreferrer');
+      else window.location.href = contactLink('viber');
+    });
+    $('[data-copy-message]', form).addEventListener('click', () => { copyMessage(form); });
+    $$('[data-open-whatsapp], [data-open-viber]', form).forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (!validate(form)) { event.preventDefault(); return; }
+        refreshMessage(form);
+      });
+    });
+    form.addEventListener('input', (event) => {
+      if (event.target.name) showError(form, event.target.name);
+      if (!$('[data-message-panel]', form).hidden) refreshMessage(form);
+    });
+    document.addEventListener('languagechange', () => {
+      if (!$('[data-message-panel]', form).hidden) refreshMessage(form);
+    });
   });
-
-  // Prefill the service dropdown from "Ζητήστε προσφορά" links on service cards.
-  document.addEventListener('click', (e) => {
-    const trigger = e.target.closest('[data-service]');
-    const select = document.getElementById('q-service');
+  // Service ids are language-independent, so a switch never loses the choice.
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-service]');
+    const select = $('#q-service');
     if (!trigger || !select) return;
-
-    const wanted = trigger.dataset.service;
-    const match = Array.from(select.options).find((o) => o.value === wanted);
-    if (match) {
-      select.value = wanted;
-    } else {
-      select.value = 'Άλλο';
-      const notes = document.getElementById('q-notes');
-      if (notes && !notes.value.trim()) notes.value = `Ενδιαφέρομαι για: ${wanted}`;
-    }
+    select.value = SERVICE_IDS.includes(trigger.dataset.service) ? trigger.dataset.service : 'other';
+    select.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
